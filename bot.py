@@ -356,7 +356,14 @@ async def run_userbot():
 async def run_main_bot():
     """Chạy main bot polling với auto-retry."""
     init_db()
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .read_timeout(30)
+        .write_timeout(30)
+        .connect_timeout(30)
+        .build()
+    )
     app.add_handler(CommandHandler("start",     start_cmd))
     app.add_handler(CommandHandler("createkey", createkey_cmd))
     app.add_handler(CommandHandler("deletekey", deletekey_cmd))
@@ -374,9 +381,6 @@ async def run_main_bot():
             await app.updater.start_polling(
                 allowed_updates=Update.ALL_TYPES,
                 drop_pending_updates=True,
-                read_timeout=30,
-                write_timeout=30,
-                connect_timeout=30,
             )
             logger.info("Polling ✅")
             break
