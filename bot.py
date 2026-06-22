@@ -311,33 +311,42 @@ async def run_http_server():
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
     logger.info(f"HTTP server :{PORT}")
 
-def _make_userbot():
-    """Tạo TelegramClient từ StringSession hoặc file session."""
-    global userbot_client
-    sess_str = SESSION_STRING.strip() if SESSION_STRING else ""
-    if sess_str:
-        try:
-            StringSession(sess_str)   # validate
-            logger.info("Dùng StringSession")
-            userbot_client = TelegramClient(StringSession(sess_str), API_ID, API_HASH)
-            return True
-        except Exception as e:
-            logger.warning(f"StringSession lỗi ({e}), dùng file session")
-    logger.info("Dùng file session")
-    userbot_client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
-    return False
-
 async def run_userbot():
-    """Chạy userbot với auto-reconnect vô hạn."""
+    """Chạy userbot với auto-reconnect vô hạn. Timeout start() tránh treo OTP."""
     global userbot_client
     retry = 0
+    wait  = 5
+
     while True:
         try:
-            used_string = _make_userbot()
-            await userbot_client.start(phone=PHONE if not used_string else None)
+            sess_str   = SESSION_STRING.strip() if SESSION_STRING else ""
+            has_string = False
+            if sess_str:
+                try:
+                    StringSession(sess_str)   # kiểm tra format
+                    has_string = True
+                except Exception:
+                    logger.warning("SESSION_STRING sai format — dùng file session")
+
+            if has_string:
+                logger.info("Dùng StringSession")
+                userbot_client = TelegramClient(
+                    StringSession(sess_str), API_ID, API_HASH,
+                    connection_retries=3, retry_delay=5,
+                )
+                await asyncio.wait_for(userbot_client.start(phone=None), timeout=30)
+            else:
+                logger.info("Dùng file session")
+                userbot_client = TelegramClient(
+                    SESSION_FILE, API_ID, API_HASH,
+                    connection_retries=3, retry_delay=5,
+                )
+                await asyncio.wait_for(userbot_client.start(phone=PHONE), timeout=30)
+
             me = await userbot_client.get_me()
             logger.info(f"Userbot OK: {me.first_name} (@{me.username})")
-            retry = 0  # reset sau khi kết nối thành công
+            retry = 0
+            wait  = 5
 
             @userbot_client.on(events.NewMessage(from_users=FLUORITE_BOT))
             async def _new(event): await on_fluorite_new(event)
@@ -346,17 +355,23 @@ async def run_userbot():
             async def _edit(event): await on_fluorite_edit(event)
 
             await userbot_client.run_until_disconnected()
-            logger.warning("Userbot bị disconnect — reconnect...")
+            logger.warning("Userbot disconnect — đang reconnect...")
 
+        except asyncio.TimeoutError:
+            retry += 1
+            wait = min(60, 10 * retry)
+            logger.error(f"[userbot] start() bị timeout — SESSION_STRING có thể lỗi (thử {retry}) → thử lại sau {wait}s")
         except Exception as e:
             retry += 1
             wait = min(30, 5 * retry)
-            logger.error(f"Userbot lỗi (lần {retry}): {e} — thử lại sau {wait}s")
-            try:
+            logger.error(f"[userbot] lỗi (thử {retry}): {e} → thử lại sau {wait}s")
+
+        try:
+            if userbot_client:
                 await userbot_client.disconnect()
-            except Exception:
-                pass
-            await asyncio.sleep(wait)
+        except Exception:
+            pass
+        await asyncio.sleep(wait)
 
 async def run_main_bot():
     """Chạy main bot polling với auto-retry."""
