@@ -130,8 +130,13 @@ def extract_html(event) -> str:
 
 async def send_via_userbot(text: str, user_id: int) -> str:
     global userbot_client
-    if userbot_client is None or not userbot_client.is_connected():
-        return "⚠️ Userbot đang kết nối lại, thử sau 10 giây."
+    # Chờ userbot sẵn sàng tối đa 15s thay vì báo lỗi ngay
+    for _ in range(15):
+        if userbot_client is not None and userbot_client.is_connected():
+            break
+        await asyncio.sleep(1)
+    else:
+        return "⚠️ Userbot chưa kết nối được, thử lại sau."
     loop = asyncio.get_running_loop()
     fut  = loop.create_future()
     relay_map[user_id] = fut
